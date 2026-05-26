@@ -1,0 +1,41 @@
+services:
+  mysql-ventas:
+    image: mysql:8.4
+    container_name: mysql-ventas
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-ventasdb}
+      MYSQL_USER: ${MYSQL_USER:-ventasuser}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-ventaspass}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpass}
+    ports:
+      - "3307:3306"
+    volumes:
+      - ventas_mysql_data:/var/lib/mysql
+    networks:
+      - ventas-net
+    restart: unless-stopped
+
+  backend-ventas:
+    build: .
+    image: ${DOCKERHUB_USERNAME:-local}/backend-ventas:latest
+    container_name: backend-ventas
+    depends_on:
+      - mysql-ventas
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql-ventas:3306/${MYSQL_DATABASE:-ventasdb}?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      SPRING_DATASOURCE_USERNAME: ${MYSQL_USER:-ventasuser}
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD:-ventaspass}
+    ports:
+      - "8081:8080"
+    networks:
+      - ventas-net
+    restart: unless-stopped
+
+volumes:
+  ventas_mysql_data:
+    name: ventas_mysql_data
+
+networks:
+  ventas-net:
+    name: ventas-net
