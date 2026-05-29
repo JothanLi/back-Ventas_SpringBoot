@@ -6,7 +6,7 @@ services:
       MYSQL_DATABASE: ${MYSQL_DATABASE:-ventasdb}
       MYSQL_USER: ${MYSQL_USER:-ventasuser}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-ventaspass}
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpass}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpass123}
     ports:
       - "3307:3306"
     volumes:
