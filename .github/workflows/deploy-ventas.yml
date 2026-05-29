@@ -61,44 +61,43 @@ jobs:
 
           compose = f"""services:
             mysql-ventas:
-              image: mysql:8.4
-              container_name: mysql-ventas
-              environment:
+                image: mysql:8.4
+                container_name: mysql-ventas
+                environment:
                 MYSQL_DATABASE: {mysql_database}
                 MYSQL_USER: {mysql_user}
                 MYSQL_PASSWORD: {mysql_password}
                 MYSQL_ROOT_PASSWORD: {mysql_root_password}
-              volumes:
+                volumes:
                 - ventas_mysql_data:/var/lib/mysql
-              networks:
+                networks:
                 - ventas-net
-              restart: unless-stopped
+                restart: unless-stopped
 
             backend-ventas:
-              image: {dockerhub_username}/backend-ventas:latest
-              container_name: backend-ventas
-              depends_on:
+                image: {dockerhub_username}/backend-ventas:latest
+                container_name: backend-ventas
+                depends_on:
                 - mysql-ventas
-              environment:
-                DB_ENDPOINT: mysql-ventas
-                DB_PORT: 3306
-                DB_NAME: {mysql_database}
-                DB_USERNAME: {mysql_user}
-                DB_PASSWORD: {mysql_password}
-              ports:
+                environment:
+                SPRING_PROFILES_ACTIVE: docker
+                SPRING_DATASOURCE_URL: jdbc:mysql://mysql-ventas:3306/{mysql_database}?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+                SPRING_DATASOURCE_USERNAME: {mysql_user}
+                SPRING_DATASOURCE_PASSWORD: {mysql_password}
+                ports:
                 - "8083:8080"
-              networks:
+                networks:
                 - ventas-net
-              restart: unless-stopped
+                restart: unless-stopped
 
-          volumes:
+            volumes:
             ventas_mysql_data:
-              name: ventas_mysql_data
+                name: ventas_mysql_data
 
-          networks:
+            networks:
             ventas-net:
-              name: ventas-net
-          """
+                name: ventas-net
+            """ 
 
           commands = [
               "mkdir -p /home/ec2-user/backend-ventas",
