@@ -26,8 +26,8 @@ jobs:
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
-          context: ./back-Ventas_SpringBoot/Springboot-API-REST-VENTAS
-          file: ./back-Ventas_SpringBoot/Springboot-API-REST-VENTAS/Dockerfile
+          context: ./back-Ventas_SpringBoot/Springboot-API-REST
+          file: ./back-Ventas_SpringBoot/Springboot-API-REST/Dockerfile
           push: true
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/backend-ventas:latest
 
