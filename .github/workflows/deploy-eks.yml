@@ -1,0 +1,77 @@
+name: Deploy Ventas to EKS
+
+on:
+  push:
+    branches:
+      - deploy
+
+env:
+  ECR_REPOSITORY: innovatech-ventas
+  DEPLOYMENT_NAME: ventas
+  CONTAINER_NAME: ventas
+  APP_DIR: back-Ventas_SpringBoot/Springboot-API-REST
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout codigo
+        uses: actions/checkout@v4
+
+      - name: Configurar credenciales AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login a Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Definir tag de imagen
+        run: echo "IMAGE_TAG=${GITHUB_SHA::7}" >> $GITHUB_ENV
+
+      - name: Build y push imagen ventas
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          cd $APP_DIR
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+
+      - name: Instalar kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: v1.29.0
+
+      - name: Configurar kubeconfig EKS
+        run: |
+          aws eks update-kubeconfig \
+            --region ${{ secrets.AWS_REGION }} \
+            --name ${{ secrets.EKS_CLUSTER_NAME }}
+
+      - name: Aplicar manifiestos Kubernetes
+        run: |
+          kubectl apply -f $APP_DIR/k8s/mysql-ventas-secret.yaml
+          kubectl apply -f $APP_DIR/k8s/mysql-ventas-deployment.yaml
+          kubectl apply -f $APP_DIR/k8s/mysql-ventas-service.yaml
+          kubectl apply -f $APP_DIR/k8s/ventas-deployment.yaml
+          kubectl apply -f $APP_DIR/k8s/ventas-service.yaml
+          kubectl apply -f $APP_DIR/k8s/ventas-hpa.yaml
+
+      - name: Actualizar imagen en EKS
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          kubectl set image deployment/$DEPLOYMENT_NAME \
+            $CONTAINER_NAME=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+            -n ${{ secrets.EKS_NAMESPACE }}
+
+      - name: Validar rollout
+        run: |
+          kubectl rollout status deployment/$DEPLOYMENT_NAME -n ${{ secrets.EKS_NAMESPACE }}
+          kubectl get pods -n ${{ secrets.EKS_NAMESPACE }}
+          kubectl get svc -n ${{ secrets.EKS_NAMESPACE }}
