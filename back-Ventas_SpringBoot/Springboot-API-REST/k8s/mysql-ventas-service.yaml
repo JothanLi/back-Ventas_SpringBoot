@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-ventas
+  namespace: innovatech
+spec:
+  type: ClusterIP
+  selector:
+    app: mysql-ventas
+  ports:
+    - port: 3306
+      targetPort: 3306
