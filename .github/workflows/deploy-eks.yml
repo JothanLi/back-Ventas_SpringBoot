@@ -1,22 +1,54 @@
-name: Deploy Ventas to EKS
+name: CI/CD Ventas - EKS
 
 on:
+  pull_request:
+    branches: [main]
   push:
-    branches:
-      - deploy
+    branches: [main, deploy]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ventas-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
-  ECR_REPOSITORY: innovatech-ventas
-  DEPLOYMENT_NAME: ventas
-  CONTAINER_NAME: ventas
   APP_DIR: back-Ventas_SpringBoot/Springboot-API-REST
+  ECR_REPOSITORY: innovatech-ventas
+  K8S_NAMESPACE: innovatech
 
 jobs:
-  deploy:
+  test:
+    name: Pruebas y compilación
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout codigo
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configurar Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+          cache-dependency-path: ${{ env.APP_DIR }}/pom.xml
+
+      - name: Ejecutar pruebas
+        working-directory: ${{ env.APP_DIR }}
+        run: mvn -B clean test
+
+      - name: Empaquetar aplicación
+        working-directory: ${{ env.APP_DIR }}
+        run: mvn -B -DskipTests package
+
+  deploy:
+    name: Build, ECR y despliegue EKS
+    if: github.event_name == 'push'
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Configurar credenciales AWS
@@ -27,51 +59,96 @@ jobs:
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Login a Amazon ECR
+      - name: Login en Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Definir tag de imagen
-        run: echo "IMAGE_TAG=${GITHUB_SHA::7}" >> $GITHUB_ENV
-
-      - name: Build y push imagen ventas
+      - name: Definir imagen trazable
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         run: |
-          cd $APP_DIR
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          echo "IMAGE_TAG=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+          echo "IMAGE_URI=$ECR_REGISTRY/$ECR_REPOSITORY:${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+
+      - name: Construir imagen Docker
+        working-directory: ${{ env.APP_DIR }}
+        run: docker build --pull -t "$IMAGE_URI" .
+
+      - name: Escanear vulnerabilidades críticas
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.IMAGE_URI }}
+          format: table
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Publicar imagen en ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          docker push "$IMAGE_URI"
+          docker tag "$IMAGE_URI" "$ECR_REGISTRY/$ECR_REPOSITORY:latest"
+          docker push "$ECR_REGISTRY/$ECR_REPOSITORY:latest"
 
       - name: Instalar kubectl
         uses: azure/setup-kubectl@v4
         with:
           version: v1.29.0
 
-      - name: Configurar kubeconfig EKS
+      - name: Configurar kubeconfig
         run: |
           aws eks update-kubeconfig \
-            --region ${{ secrets.AWS_REGION }} \
-            --name ${{ secrets.EKS_CLUSTER_NAME }}
+            --region "${{ secrets.AWS_REGION }}" \
+            --name "${{ secrets.EKS_CLUSTER_NAME }}"
 
-      - name: Aplicar manifiestos Kubernetes
-        run: |
-          kubectl apply -f $APP_DIR/k8s/mysql-ventas-secret.yaml
-          kubectl apply -f $APP_DIR/k8s/mysql-ventas-deployment.yaml
-          kubectl apply -f $APP_DIR/k8s/mysql-ventas-service.yaml
-          kubectl apply -f $APP_DIR/k8s/ventas-deployment.yaml
-          kubectl apply -f $APP_DIR/k8s/ventas-service.yaml
-          kubectl apply -f $APP_DIR/k8s/ventas-hpa.yaml
-
-      - name: Actualizar imagen en EKS
+      - name: Crear namespace y secreto de base de datos
         env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          DB_USER: ${{ secrets.VENTAS_DB_USER }}
+          DB_PASSWORD: ${{ secrets.VENTAS_DB_PASSWORD }}
+          DB_ROOT_PASSWORD: ${{ secrets.VENTAS_DB_ROOT_PASSWORD }}
         run: |
-          kubectl set image deployment/$DEPLOYMENT_NAME \
-            $CONTAINER_NAME=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
-            -n ${{ secrets.EKS_NAMESPACE }}
+          kubectl apply -f "$APP_DIR/k8s/namespace.yaml"
+          kubectl create secret generic mysql-ventas-secret \
+            --namespace "$K8S_NAMESPACE" \
+            --from-literal=MYSQL_DATABASE=ventasdb \
+            --from-literal=MYSQL_USER="$DB_USER" \
+            --from-literal=MYSQL_PASSWORD="$DB_PASSWORD" \
+            --from-literal=MYSQL_ROOT_PASSWORD="$DB_ROOT_PASSWORD" \
+            --dry-run=client -o yaml | kubectl apply -f -
 
-      - name: Validar rollout
+      - name: Desplegar MySQL persistente
         run: |
-          kubectl rollout status deployment/$DEPLOYMENT_NAME -n ${{ secrets.EKS_NAMESPACE }}
-          kubectl get pods -n ${{ secrets.EKS_NAMESPACE }}
-          kubectl get svc -n ${{ secrets.EKS_NAMESPACE }}
+          kubectl apply -f "$APP_DIR/k8s/mysql-ventas-service.yaml"
+          kubectl apply -f "$APP_DIR/k8s/mysql-ventas-statefulset.yaml"
+          kubectl rollout status statefulset/mysql-ventas \
+            -n "$K8S_NAMESPACE" --timeout=8m
+
+      - name: Desplegar API de ventas
+        run: |
+          sed "s|IMAGE_PLACEHOLDER|$IMAGE_URI|g" \
+            "$APP_DIR/k8s/ventas-deployment.yaml" | kubectl apply -f -
+          kubectl apply -f "$APP_DIR/k8s/ventas-service.yaml"
+          kubectl apply -f "$APP_DIR/k8s/ventas-hpa.yaml"
+          kubectl rollout status deployment/ventas \
+            -n "$K8S_NAMESPACE" --timeout=8m
+
+      - name: Smoke test interno
+        run: |
+          kubectl run "ventas-smoke-${GITHUB_RUN_ID}" \
+            -n "$K8S_NAMESPACE" \
+            --image=curlimages/curl:8.10.1 \
+            --restart=Never --rm -i -- \
+            curl -fsS --retry 12 --retry-connrefused --retry-delay 5 \
+            http://ventas-service:8080/actuator/health/readiness
+
+      - name: Estado final
+        run: |
+          kubectl get pods,svc,hpa,pvc -n "$K8S_NAMESPACE"
+
+      - name: Diagnóstico en caso de error
+        if: failure()
+        run: |
+          kubectl get all,pvc -n "$K8S_NAMESPACE" || true
+          kubectl describe deployment/ventas -n "$K8S_NAMESPACE" || true
+          kubectl logs deployment/ventas -n "$K8S_NAMESPACE" --tail=150 || true

@@ -7,8 +7,14 @@ import java.util.List;
 
 public interface VentaService {
     List<Venta> findAllVentas();
+
     Venta saveVenta(Venta venta);
+
     Venta updateVenta(Long idVenta, Venta venta) throws VentaNotFoundException;
+
+    Venta updateDespachoGenerado(Long idVenta, Boolean despachoGenerado) throws VentaNotFoundException;
+
     void deleteVenta(Long idVenta) throws VentaNotFoundException;
+
     Venta findById(Long idVenta) throws VentaNotFoundException;
 }

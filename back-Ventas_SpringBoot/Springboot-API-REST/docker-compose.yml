@@ -5,37 +5,51 @@ services:
     environment:
       MYSQL_DATABASE: ${MYSQL_DATABASE:-ventasdb}
       MYSQL_USER: ${MYSQL_USER:-ventasuser}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-ventaspass}
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpass123}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Define MYSQL_PASSWORD en .env}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Define MYSQL_ROOT_PASSWORD en .env}
     ports:
       - "3307:3306"
     volumes:
       - ventas_mysql_data:/var/lib/mysql
     networks:
       - ventas-net
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
     restart: unless-stopped
 
   backend-ventas:
     build: .
-    image: ${DOCKERHUB_USERNAME:-local}/backend-ventas:latest
+    image: local/backend-ventas:latest
     container_name: backend-ventas
     depends_on:
-      - mysql-ventas
+      mysql-ventas:
+        condition: service_healthy
     environment:
       SPRING_PROFILES_ACTIVE: docker
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql-ventas:3306/${MYSQL_DATABASE:-ventasdb}?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
       SPRING_DATASOURCE_USERNAME: ${MYSQL_USER:-ventasuser}
-      SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD:-ventaspass}
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD:?Define MYSQL_PASSWORD en .env}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost,http://localhost:5173}
     ports:
       - "8081:8080"
     networks:
-      - ventas-net
+      ventas-net:
+        aliases:
+          - ventas-service
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health/readiness || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 45s
     restart: unless-stopped
 
 volumes:
   ventas_mysql_data:
-    name: ventas_mysql_data
 
 networks:
   ventas-net:
-    name: ventas-net

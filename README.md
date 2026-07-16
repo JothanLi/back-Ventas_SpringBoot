@@ -1,301 +1,111 @@
-# Back Ventas - Spring Boot API REST
+# Backend de Ventas
 
-API REST desarrollada con Spring Boot para gestionar ventas. El servicio permite crear, listar, buscar, actualizar y eliminar ventas, persistiendo la información en MySQL. Además incluye documentación Swagger/OpenAPI, configuración Docker y manifiestos Kubernetes para despliegue.
+API REST Spring Boot para administrar ventas y marcar cuándo una venta ya tiene una orden de despacho asociada.
 
-## Tecnologías utilizadas
+## Tecnologías
 
-- Java 17
-- Spring Boot 3.4.4
-- Spring Web
-- Spring Data JPA
-- Bean Validation
-- MySQL 8.4
-- Lombok
-- Springdoc OpenAPI / Swagger UI
-- Maven Wrapper
-- Docker / Docker Compose
-- Kubernetes / EKS
-- H2 para pruebas
+- Java 17 y Spring Boot 3.4.4
+- Spring Web, Validation, JPA y Actuator
+- MySQL 8.4 en desarrollo y producción
+- H2 para pruebas automatizadas
+- Docker multietapa y Docker Compose
+- Kubernetes/EKS con Deployment, Service, HPA y MySQL persistente mediante StatefulSet
+- GitHub Actions: test, package, Docker build, Trivy, ECR, deploy y smoke test
 
-## Estructura principal
+## Estructura
 
 ```text
-Springboot-API-REST/
-├── src/main/java/com/citt/
-│   ├── controller/          # Controladores REST
-│   ├── persistence/entity/   # Entidades JPA
-│   ├── persistence/repository/ # Repositorios Spring Data
-│   ├── persistence/services/ # Lógica de negocio
-│   ├── exceptions/           # Manejo de errores
-│   └── config/               # Configuración Swagger/OpenAPI
-├── src/main/resources/
-│   ├── application.properties
-│   ├── application-docker.properties
-│   └── application-test.properties
-├── k8s/                      # Manifiestos Kubernetes
+.github/workflows/deploy-eks.yml
+back-Ventas_SpringBoot/Springboot-API-REST/
+├── src/
 ├── Dockerfile
 ├── docker-compose.yml
-├── docker-compose.prod.yml
-└── pom.xml
+├── .env.example
+└── k8s/
 ```
 
-## Funcionalidades
+## Endpoints
 
-- Crear ventas.
-- Listar todas las ventas.
-- Buscar una venta por ID.
-- Actualizar una venta existente.
-- Eliminar una venta.
-- Validar campos obligatorios como dirección, fecha y estado de despacho generado.
-- Exponer documentación Swagger para probar endpoints.
-
-## Modelo de datos: Venta
-
-La entidad principal es `Venta` y contiene los siguientes campos:
-
-| Campo | Tipo | Descripción |
+| Método | Ruta | Uso |
 |---|---|---|
-| `idVenta` | Long | Identificador único generado automáticamente. |
-| `direccionCompra` | String | Dirección asociada a la compra. Campo obligatorio. |
-| `valorCompra` | int | Valor total de la compra. |
-| `fechaCompra` | LocalDate | Fecha de compra. Campo obligatorio. |
-| `despachoGenerado` | Boolean | Indica si la venta ya tiene despacho generado. |
+| GET | `/api/v1/ventas` | Listar ventas |
+| GET | `/api/v1/ventas/{id}` | Consultar venta |
+| POST | `/api/v1/ventas` | Crear venta |
+| PUT | `/api/v1/ventas/{id}` | Reemplazar datos de venta |
+| PATCH | `/api/v1/ventas/{id}/despacho` | Cambiar solamente `despachoGenerado` |
+| DELETE | `/api/v1/ventas/{id}` | Eliminar venta |
+| GET | `/actuator/health/readiness` | Readiness probe |
+| GET | `/actuator/health/liveness` | Liveness probe |
+| GET | `/swagger-ui.html` | Swagger UI |
 
-## Endpoints principales
+El endpoint PATCH evita que una actualización parcial deje `valorCompra` en cero.
 
-Base URL local:
-
-```text
-http://localhost:8081/api/v1/ventas
-```
-
-| Método | Endpoint | Descripción |
-|---|---|---|
-| `GET` | `/api/v1/ventas` | Lista todas las ventas. |
-| `GET` | `/api/v1/ventas/{idVenta}` | Obtiene una venta por ID. |
-| `POST` | `/api/v1/ventas` | Crea una nueva venta. |
-| `PUT` | `/api/v1/ventas/{idVenta}` | Actualiza una venta existente. |
-| `DELETE` | `/api/v1/ventas/{idVenta}` | Elimina una venta. |
-
-## Ejemplos de uso
-
-### Crear una venta
+## Ejecución local
 
 ```bash
-curl -X POST http://localhost:8081/api/v1/ventas \
-  -H "Content-Type: application/json" \
-  -d '{
-    "direccionCompra": "Av. Providencia 1234, Santiago",
-    "valorCompra": 45990,
-    "fechaCompra": "2026-07-04",
-    "despachoGenerado": false
-  }'
-```
-
-### Listar ventas
-
-```bash
-curl http://localhost:8081/api/v1/ventas
-```
-
-### Buscar venta por ID
-
-```bash
-curl http://localhost:8081/api/v1/ventas/1
-```
-
-### Actualizar una venta
-
-```bash
-curl -X PUT http://localhost:8081/api/v1/ventas/1 \
-  -H "Content-Type: application/json" \
-  -d '{
-    "direccionCompra": "Av. Las Condes 1450, Santiago",
-    "valorCompra": 67990,
-    "fechaCompra": "2026-07-04",
-    "despachoGenerado": true
-  }'
-```
-
-### Eliminar una venta
-
-```bash
-curl -X DELETE http://localhost:8081/api/v1/ventas/1
-```
-
-## Requisitos previos
-
-Para ejecutar el proyecto localmente se necesita:
-
-- Java 17 instalado.
-- Maven o Maven Wrapper incluido en el proyecto.
-- MySQL disponible, o Docker instalado para levantar la base de datos automáticamente.
-
-## Variables de entorno
-
-La configuración principal usa variables de entorno para conectarse a MySQL:
-
-| Variable | Descripción | Ejemplo |
-|---|---|---|
-| `DB_ENDPOINT` | Host de la base de datos. | `localhost` |
-| `DB_PORT` | Puerto de MySQL. | `3307` |
-| `DB_NAME` | Nombre de la base de datos. | `ventasdb` |
-| `DB_USERNAME` | Usuario de MySQL. | `ventasuser` |
-| `DB_PASSWORD` | Contraseña de MySQL. | `ventaspass` |
-
-En Docker se usan estas variables:
-
-| Variable | Valor por defecto |
-|---|---|
-| `MYSQL_DATABASE` | `ventasdb` |
-| `MYSQL_USER` | `ventasuser` |
-| `MYSQL_PASSWORD` | `ventaspass` |
-| `MYSQL_ROOT_PASSWORD` | `rootpass123` |
-| `SPRING_PROFILES_ACTIVE` | `docker` |
-
-## Ejecución local con Maven
-
-Desde la carpeta raíz del proyecto:
-
-```bash
-./mvnw clean package
-./mvnw spring-boot:run
-```
-
-En Windows:
-
-```powershell
-.\mvnw.cmd clean package
-.\mvnw.cmd spring-boot:run
-```
-
-El servicio quedará disponible en:
-
-```text
-http://localhost:8081
-```
-
-## Ejecución con Docker Compose
-
-El archivo `docker-compose.yml` levanta MySQL y el backend.
-
-```bash
+cd back-Ventas_SpringBoot/Springboot-API-REST
+cp .env.example .env
 docker compose up --build -d
+docker compose ps
 ```
 
-Ver contenedores:
+- API: `http://localhost:8081/api/v1/ventas`
+- Swagger: `http://localhost:8081/swagger-ui.html`
+- MySQL: `localhost:3307`
 
-```bash
-docker ps
-```
-
-Ver logs del backend:
-
-```bash
-docker logs backend-ventas -f
-```
-
-Detener servicios:
+Detener sin borrar datos:
 
 ```bash
 docker compose down
 ```
 
-Eliminar también los datos persistidos:
+Detener y eliminar el volumen:
 
 ```bash
 docker compose down -v
 ```
 
-Con Docker Compose, los puertos principales son:
-
-| Servicio | Puerto local | Puerto interno |
-|---|---:|---:|
-| Backend ventas | `8081` | `8080` |
-| MySQL ventas | `3307` | `3306` |
-
-## Swagger / OpenAPI
-
-La documentación de la API está disponible en:
-
-```text
-http://localhost:8081/swagger-ui.html
-```
-
-Desde ahí se pueden probar los endpoints sin usar Postman o curl.
-
 ## Pruebas
 
-El proyecto incluye pruebas con Spring Boot Test y H2 para ambiente de test.
-
-Ejecutar pruebas:
-
 ```bash
-./mvnw test
+cd back-Ventas_SpringBoot/Springboot-API-REST
+./mvnw clean test
 ```
 
 En Windows:
 
 ```powershell
-.\mvnw.cmd test
+.\mvnw.cmd clean test
 ```
 
-## Despliegue en Kubernetes / EKS
+## Pipeline CI/CD
 
-El proyecto incluye manifiestos en la carpeta `k8s/`:
+Se ejecuta en `main` y `deploy`. En Pull Request realiza pruebas y empaquetado. En Push además:
+
+1. Construye la imagen.
+2. Escanea vulnerabilidades críticas con Trivy.
+3. Publica etiquetas `${GITHUB_SHA::7}` y `latest` en ECR.
+4. Crea el namespace y el Secret desde GitHub Secrets.
+5. Despliega MySQL como StatefulSet con PVC.
+6. Despliega la API y el HPA.
+7. Ejecuta un smoke test dentro del clúster.
+8. Publica diagnóstico y logs si falla.
+
+### GitHub Secrets requeridos
 
 ```text
-k8s/
-├── mysql-ventas-deployment.yaml
-├── mysql-ventas-secret.yaml
-├── mysql-ventas-service.yaml
-├── ventas-deployment.yaml
-├── ventas-hpa.yaml
-└── ventas-service.yaml
+AWS_ACCESS_KEY_ID
+AWS_SECRET_ACCESS_KEY
+AWS_SESSION_TOKEN
+AWS_REGION
+EKS_CLUSTER_NAME
+VENTAS_DB_USER
+VENTAS_DB_PASSWORD
+VENTAS_DB_ROOT_PASSWORD
 ```
 
-Aplicar manifiestos:
+No se versionan contraseñas reales. `k8s/mysql-ventas-secret.example.yaml` es solamente una plantilla.
 
-```bash
-kubectl apply -f k8s/
-```
+## Persistencia y escalabilidad
 
-Ver recursos:
-
-```bash
-kubectl get pods -n innovatech
-kubectl get svc -n innovatech
-kubectl get hpa -n innovatech
-```
-
-El servicio de ventas queda expuesto internamente dentro del cluster como:
-
-```text
-ventas-service:8080
-```
-
-## Imagen Docker
-
-Construir imagen local:
-
-```bash
-docker build -t backend-ventas:latest .
-```
-
-Ejecutar imagen manualmente:
-
-```bash
-docker run -p 8081:8080 \
-  -e SPRING_PROFILES_ACTIVE=docker \
-  -e SPRING_DATASOURCE_URL="jdbc:mysql://host.docker.internal:3307/ventasdb?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC" \
-  -e SPRING_DATASOURCE_USERNAME=ventasuser \
-  -e SPRING_DATASOURCE_PASSWORD=ventaspass \
-  backend-ventas:latest
-```
-
-## Notas importantes
-
-- El proyecto utiliza `spring.jpa.hibernate.ddl-auto=update`, por lo que Hibernate crea o actualiza las tablas automáticamente.
-- La base de datos principal es `ventasdb`.
-- El endpoint `/api/v1/ventas` también se usa como ruta de health check en Kubernetes.
-- Si se ejecuta junto al frontend en Kubernetes, Nginx redirige `/api/v1/ventas` hacia `ventas-service:8080`.
+MySQL utiliza un StatefulSet y un `volumeClaimTemplates` de 5 GiB. La API utiliza requests/limits, rolling update, probes y un HPA entre 1 y 3 réplicas.

@@ -5,6 +5,12 @@ metadata:
   namespace: innovatech
 spec:
   replicas: 1
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       app: ventas
@@ -15,9 +21,11 @@ spec:
     spec:
       containers:
         - name: ventas
-          image: 910047016035.dkr.ecr.us-east-1.amazonaws.com/innovatech-ventas:latest
+          image: IMAGE_PLACEHOLDER
+          imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 8080
+            - name: http
+              containerPort: 8080
           env:
             - name: SPRING_PROFILES_ACTIVE
               value: docker
@@ -33,22 +41,45 @@ spec:
                 secretKeyRef:
                   name: mysql-ventas-secret
                   key: MYSQL_PASSWORD
+            - name: CORS_ALLOWED_ORIGINS
+              value: http://localhost
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            failureThreshold: 30
+            periodSeconds: 10
           readinessProbe:
             httpGet:
-              path: /api/v1/ventas
-              port: 8080
-            initialDelaySeconds: 40
+              path: /actuator/health/readiness
+              port: http
+            initialDelaySeconds: 5
             periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
           livenessProbe:
             httpGet:
-              path: /api/v1/ventas
-              port: 8080
-            initialDelaySeconds: 60
+              path: /actuator/health/liveness
+              port: http
+            initialDelaySeconds: 20
             periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
           resources:
             requests:
-              cpu: "100m"
-              memory: "256Mi"
+              cpu: 100m
+              memory: 256Mi
             limits:
-              cpu: "500m"
-              memory: "512Mi"
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
