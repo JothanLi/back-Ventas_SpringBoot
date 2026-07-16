@@ -58,6 +58,7 @@ spec:
     - metadata:
         name: mysql-ventas-data
       spec:
+        storageClassName: auto-ebs-sc
         accessModes: ["ReadWriteOnce"]
         resources:
           requests:

@@ -119,6 +119,11 @@ jobs:
             --from-literal=MYSQL_ROOT_PASSWORD="$DB_ROOT_PASSWORD" \
             --dry-run=client -o yaml | kubectl apply -f -
 
+      - name: Configurar almacenamiento EBS
+        run: |
+          kubectl apply -f "$APP_DIR/k8s/storage-class.yaml"
+          kubectl get storageclass
+              
       - name: Desplegar MySQL persistente
         run: |
           kubectl apply -f "$APP_DIR/k8s/mysql-ventas-service.yaml"
