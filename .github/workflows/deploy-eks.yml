@@ -75,7 +75,7 @@ jobs:
         run: docker build --pull -t "$IMAGE_URI" .
 
       - name: Escanear vulnerabilidades críticas
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
         with:
           image-ref: ${{ env.IMAGE_URI }}
           format: table
@@ -94,7 +94,7 @@ jobs:
       - name: Instalar kubectl
         uses: azure/setup-kubectl@v4
         with:
-          version: v1.29.0
+          version: v1.35.0
 
       - name: Configurar kubeconfig
         run: |
