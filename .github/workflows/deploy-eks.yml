@@ -149,21 +149,44 @@ jobs:
 
       - name: Crear namespace y secreto de base de datos
         env:
-          DB_USER: ${{ secrets.VENTAS_DB_USER }}
-          DB_PASSWORD: ${{ secrets.VENTAS_DB_PASSWORD }}
-          DB_ROOT_PASSWORD: ${{ secrets.VENTAS_DB_ROOT_PASSWORD }}
+          DB_NAME: ${{ secrets.MYSQL_DATABASE }}
+          DB_USER: ${{ secrets.MYSQL_USER }}
+          DB_PASSWORD: ${{ secrets.MYSQL_PASSWORD }}
+          DB_ROOT_PASSWORD: ${{ secrets.MYSQL_ROOT_PASSWORD }}
         run: |
           kubectl apply \
             -f "$APP_DIR/k8s/namespace.yaml"
 
+          test -n "$DB_NAME" || {
+            echo "Falta el secret MYSQL_DATABASE"
+            exit 1
+          }
+
+          test -n "$DB_USER" || {
+            echo "Falta el secret MYSQL_USER"
+            exit 1
+          }
+
+          test -n "$DB_PASSWORD" || {
+            echo "Falta el secret MYSQL_PASSWORD"
+            exit 1
+          }
+
+          test -n "$DB_ROOT_PASSWORD" || {
+            echo "Falta el secret MYSQL_ROOT_PASSWORD"
+            exit 1
+          }
+
           kubectl create secret generic mysql-ventas-secret \
             --namespace "$K8S_NAMESPACE" \
-            --from-literal=MYSQL_DATABASE=ventasdb \
+            --from-literal=MYSQL_DATABASE="$DB_NAME" \
             --from-literal=MYSQL_USER="$DB_USER" \
             --from-literal=MYSQL_PASSWORD="$DB_PASSWORD" \
             --from-literal=MYSQL_ROOT_PASSWORD="$DB_ROOT_PASSWORD" \
             --dry-run=client \
             -o yaml | kubectl apply -f -
+
+          echo "Secret mysql-ventas-secret creado o actualizado correctamente."
 
       - name: Configurar almacenamiento EBS
         run: |
