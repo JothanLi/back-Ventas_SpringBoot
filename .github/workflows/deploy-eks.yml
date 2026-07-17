@@ -201,6 +201,9 @@ jobs:
             -f "$APP_DIR/k8s/mysql-ventas-service.yaml"
 
           kubectl apply \
+            -f "$APP_DIR/k8s/ventas-hpa.yaml"
+
+          kubectl apply \
             -f "$APP_DIR/k8s/mysql-ventas-statefulset.yaml"
 
           kubectl rollout status statefulset/mysql-ventas \
