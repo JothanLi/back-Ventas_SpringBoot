@@ -4,9 +4,13 @@ on:
   workflow_dispatch:
 
   pull_request:
-    branches: [main]
+    branches:
+      - main
+
   push:
-    branches: [main, deploy]
+    branches:
+      - main
+      - deploy
 
 permissions:
   contents: read
@@ -24,6 +28,7 @@ jobs:
   test:
     name: Pruebas y compilación
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -46,9 +51,18 @@ jobs:
 
   deploy:
     name: Build, ECR y despliegue EKS
-    if: github.event_name == 'push'
-    needs: test
+
+    # Despliega mediante push o ejecución manual.
+    # Los pull requests solamente ejecutan el job de pruebas.
+    if: |
+      github.event_name == 'push' ||
+      github.event_name == 'workflow_dispatch'
+
+    needs:
+      - test
+
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -61,6 +75,15 @@ jobs:
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ secrets.AWS_REGION }}
 
+      - name: Verificar identidad AWS
+        run: |
+          aws sts get-caller-identity
+          aws eks describe-cluster \
+            --region "${{ secrets.AWS_REGION }}" \
+            --name "${{ secrets.EKS_CLUSTER_NAME }}" \
+            --query "cluster.{Nombre:name,Estado:status,Version:version}" \
+            --output table
+
       - name: Login en Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
@@ -69,12 +92,21 @@ jobs:
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         run: |
-          echo "IMAGE_TAG=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
-          echo "IMAGE_URI=$ECR_REGISTRY/$ECR_REPOSITORY:${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+          IMAGE_TAG="${GITHUB_SHA::7}"
+          IMAGE_URI="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+
+          echo "IMAGE_TAG=$IMAGE_TAG" >> "$GITHUB_ENV"
+          echo "IMAGE_URI=$IMAGE_URI" >> "$GITHUB_ENV"
+
+          echo "Imagen que será desplegada: $IMAGE_URI"
 
       - name: Construir imagen Docker
         working-directory: ${{ env.APP_DIR }}
-        run: docker build --pull -t "$IMAGE_URI" .
+        run: |
+          docker build \
+            --pull \
+            --tag "$IMAGE_URI" \
+            .
 
       - name: Escanear vulnerabilidades críticas
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
@@ -90,8 +122,13 @@ jobs:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         run: |
           docker push "$IMAGE_URI"
-          docker tag "$IMAGE_URI" "$ECR_REGISTRY/$ECR_REPOSITORY:latest"
-          docker push "$ECR_REGISTRY/$ECR_REPOSITORY:latest"
+
+          docker tag \
+            "$IMAGE_URI" \
+            "$ECR_REGISTRY/$ECR_REPOSITORY:latest"
+
+          docker push \
+            "$ECR_REGISTRY/$ECR_REPOSITORY:latest"
 
       - name: Instalar kubectl
         uses: azure/setup-kubectl@v4
@@ -104,58 +141,129 @@ jobs:
             --region "${{ secrets.AWS_REGION }}" \
             --name "${{ secrets.EKS_CLUSTER_NAME }}"
 
+      - name: Verificar acceso a Kubernetes
+        run: |
+          kubectl config current-context
+          kubectl auth can-i get pods --all-namespaces
+          kubectl get namespaces
+
       - name: Crear namespace y secreto de base de datos
         env:
           DB_USER: ${{ secrets.VENTAS_DB_USER }}
           DB_PASSWORD: ${{ secrets.VENTAS_DB_PASSWORD }}
           DB_ROOT_PASSWORD: ${{ secrets.VENTAS_DB_ROOT_PASSWORD }}
         run: |
-          kubectl apply -f "$APP_DIR/k8s/namespace.yaml"
+          kubectl apply \
+            -f "$APP_DIR/k8s/namespace.yaml"
+
           kubectl create secret generic mysql-ventas-secret \
             --namespace "$K8S_NAMESPACE" \
             --from-literal=MYSQL_DATABASE=ventasdb \
             --from-literal=MYSQL_USER="$DB_USER" \
             --from-literal=MYSQL_PASSWORD="$DB_PASSWORD" \
             --from-literal=MYSQL_ROOT_PASSWORD="$DB_ROOT_PASSWORD" \
-            --dry-run=client -o yaml | kubectl apply -f -
+            --dry-run=client \
+            -o yaml | kubectl apply -f -
 
       - name: Configurar almacenamiento EBS
         run: |
-          kubectl apply -f "$APP_DIR/k8s/storage-class.yaml"
+          kubectl apply \
+            -f "$APP_DIR/k8s/storage-class.yaml"
+
           kubectl get storageclass
-              
+
       - name: Desplegar MySQL persistente
         run: |
-          kubectl apply -f "$APP_DIR/k8s/mysql-ventas-service.yaml"
-          kubectl apply -f "$APP_DIR/k8s/mysql-ventas-statefulset.yaml"
-          kubectl rollout status statefulset/mysql-ventas \
-            -n "$K8S_NAMESPACE" --timeout=8m
+          kubectl apply \
+            -f "$APP_DIR/k8s/mysql-ventas-service.yaml"
 
-      - name: Desplegar API de ventas
+          kubectl apply \
+            -f "$APP_DIR/k8s/mysql-ventas-statefulset.yaml"
+
+          kubectl rollout status statefulset/mysql-ventas \
+            --namespace "$K8S_NAMESPACE" \
+            --timeout=12m
+
+      - name: Desplegar API de Ventas
         run: |
           sed "s|IMAGE_PLACEHOLDER|$IMAGE_URI|g" \
-            "$APP_DIR/k8s/ventas-deployment.yaml" | kubectl apply -f -
-          kubectl apply -f "$APP_DIR/k8s/ventas-service.yaml"
-          kubectl apply -f "$APP_DIR/k8s/ventas-hpa.yaml"
+            "$APP_DIR/k8s/ventas-deployment.yaml" |
+            kubectl apply -f -
+
+          kubectl apply \
+            -f "$APP_DIR/k8s/ventas-service.yaml"
+
           kubectl rollout status deployment/ventas \
-            -n "$K8S_NAMESPACE" --timeout=8m
+            --namespace "$K8S_NAMESPACE" \
+            --timeout=12m
 
       - name: Smoke test interno
         run: |
           kubectl run "ventas-smoke-${GITHUB_RUN_ID}" \
-            -n "$K8S_NAMESPACE" \
+            --namespace "$K8S_NAMESPACE" \
             --image=curlimages/curl:8.10.1 \
-            --restart=Never --rm -i -- \
-            curl -fsS --retry 12 --retry-connrefused --retry-delay 5 \
-            http://ventas-service:8080/actuator/health/readiness
+            --restart=Never \
+            --rm \
+            --attach \
+            -- \
+            curl \
+              --fail \
+              --silent \
+              --show-error \
+              --retry 12 \
+              --retry-connrefused \
+              --retry-delay 5 \
+              http://ventas-service:8080/actuator/health/readiness
 
       - name: Estado final
         run: |
-          kubectl get pods,svc,hpa,pvc -n "$K8S_NAMESPACE"
+          echo "=== Deployments ==="
+          kubectl get deployments \
+            --namespace "$K8S_NAMESPACE"
+
+          echo "=== Pods ==="
+          kubectl get pods \
+            --namespace "$K8S_NAMESPACE" \
+            -o wide
+
+          echo "=== Servicios ==="
+          kubectl get services \
+            --namespace "$K8S_NAMESPACE"
+
+          echo "=== StatefulSets ==="
+          kubectl get statefulsets \
+            --namespace "$K8S_NAMESPACE"
+
+          echo "=== Persistencia ==="
+          kubectl get pvc \
+            --namespace "$K8S_NAMESPACE"
 
       - name: Diagnóstico en caso de error
         if: failure()
         run: |
-          kubectl get all,pvc -n "$K8S_NAMESPACE" || true
-          kubectl describe deployment/ventas -n "$K8S_NAMESPACE" || true
-          kubectl logs deployment/ventas -n "$K8S_NAMESPACE" --tail=150 || true
+          echo "=== Recursos generales ==="
+          kubectl get all,pvc \
+            --namespace "$K8S_NAMESPACE" || true
+
+          echo "=== Eventos recientes ==="
+          kubectl get events \
+            --namespace "$K8S_NAMESPACE" \
+            --sort-by=.metadata.creationTimestamp || true
+
+          echo "=== Descripción de MySQL ==="
+          kubectl describe statefulset/mysql-ventas \
+            --namespace "$K8S_NAMESPACE" || true
+
+          echo "=== Descripción de Ventas ==="
+          kubectl describe deployment/ventas \
+            --namespace "$K8S_NAMESPACE" || true
+
+          echo "=== Logs de MySQL ==="
+          kubectl logs statefulset/mysql-ventas \
+            --namespace "$K8S_NAMESPACE" \
+            --tail=150 || true
+
+          echo "=== Logs de Ventas ==="
+          kubectl logs deployment/ventas \
+            --namespace "$K8S_NAMESPACE" \
+            --tail=150 || true
