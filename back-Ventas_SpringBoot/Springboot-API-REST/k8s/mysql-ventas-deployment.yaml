@@ -39,3 +39,10 @@ spec:
                 secretKeyRef:
                   name: mysql-ventas-secret
                   key: MYSQL_ROOT_PASSWORD
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"

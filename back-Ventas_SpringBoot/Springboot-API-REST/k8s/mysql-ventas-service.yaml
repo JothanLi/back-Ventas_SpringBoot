@@ -4,10 +4,9 @@ metadata:
   name: mysql-ventas
   namespace: innovatech
 spec:
-  clusterIP: None
+  type: ClusterIP
   selector:
     app: mysql-ventas
   ports:
-    - name: mysql
-      port: 3306
-      targetPort: mysql
+    - port: 3306
+      targetPort: 3306

@@ -195,20 +195,22 @@ jobs:
 
           kubectl get storageclass
 
-      - name: Desplegar MySQL persistente
+      - name: Desplegar MySQL Ventas
         run: |
-          kubectl apply \
-            -f "$APP_DIR/k8s/mysql-ventas-service.yaml"
+          kubectl create secret generic mysql-ventas-secret \
+            --from-literal=MYSQL_DATABASE="${{ secrets.MYSQL_DATABASE }}" \
+            --from-literal=MYSQL_USER="${{ secrets.MYSQL_USER }}" \
+            --from-literal=MYSQL_PASSWORD="${{ secrets.MYSQL_PASSWORD }}" \
+            --from-literal=MYSQL_ROOT_PASSWORD="${{ secrets.MYSQL_ROOT_PASSWORD }}" \
+            -n "$K8S_NAMESPACE" \
+            --dry-run=client -o yaml | kubectl apply -f -
 
-          kubectl apply \
-            -f "$APP_DIR/k8s/ventas-hpa.yaml"
+          kubectl apply -f "$APP_DIR/k8s/mysql-ventas-deployment.yaml"
+          kubectl apply -f "$APP_DIR/k8s/mysql-ventas-service.yaml"
 
-          kubectl apply \
-            -f "$APP_DIR/k8s/mysql-ventas-statefulset.yaml"
-
-          kubectl rollout status statefulset/mysql-ventas \
+          kubectl rollout status deployment/mysql-ventas \
             --namespace "$K8S_NAMESPACE" \
-            --timeout=12m
+            --timeout=8m
 
       - name: Desplegar API de Ventas
         run: |
